@@ -6,14 +6,15 @@ from web3 import Web3
 import logging
 from modules.networks import get_network_by_chainid
 
+# Устанавливаем максимальную цену газа для Ethereum (в Gwei)
+MAX_GAS_PRICE_ETH = Web3.to_wei(5, 'gwei')  # Лимит на 5 Gwei
+
+gas_retry_delay = 60  # Время ожидания 1 минута
 # Настройка логирования
 logging.basicConfig(filename='transaction_log.log', level=logging.DEBUG,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 logging.debug("Модуль свапов запущен.")
-
-# Устанавливаем максимальную цену газа для Ethereum (в Gwei)
-MAX_GAS_PRICE_ETH = Web3.to_wei(5, 'gwei')  # Лимит на 5 Gwei
 
 logging.debug(f"MAX_GAS_PRICE_ETH установлена на {MAX_GAS_PRICE_ETH} Wei.")
 
@@ -171,6 +172,14 @@ def start_purchase_process():
                 print(f"Ошибка подключения к сети {network['name']} с ChainID {chain_id}. Пропуск.")
                 continue
 
+            # Проверка цены газа перед проверкой баланса
+            gas_price = web3.eth.gas_price
+            if chain_id == 1 and gas_price > MAX_GAS_PRICE_ETH:
+                logging.warning(f"Цена газа {web3.from_wei(gas_price, 'gwei')} Gwei превышает лимит.")
+                print(f"Цена газа {web3.from_wei(gas_price, 'gwei')} Gwei превышает лимит. Пропуск задачи.")
+                time.sleep(gas_retry_delay)
+                continue
+
             min_amount = network.get('min_amount', 0.0)
             max_amount = network.get('max_amount', 0.0)
             if min_amount == 0 and max_amount == 0:
@@ -183,9 +192,8 @@ def start_purchase_process():
             logging.info(f"Свапаем {swap_amount} нативного токена для YT токена {yt_token} на маркете {market_address}.")
             print(f"Свапаем {swap_amount} нативного токена для YT токена {yt_token}")
 
-            # Добавление проверки баланса перед выполнением транзакции
+            # Проверка баланса перед выполнением транзакции
             balance = web3.eth.get_balance(wallet_address)
-            gas_price = web3.eth.gas_price
             required = int(swap_amount * 1e18) + (gas_limit * gas_price)
             if balance < required:
                 logging.error(f"Недостаточно средств на кошельке {wallet_address}. Баланс: {balance}, требуется: {required}")
@@ -200,10 +208,5 @@ def start_purchase_process():
                 tasks.remove(task)  # Удаление выполненной задачи
                 save_tasks(tasks, 'tasks.json')  # Сохранение обновленного списка задач
 
-            # Генерация случайной задержки между транзакциями
-            delay = random.uniform(min_delay, max_delay)
-            logging.info(f"Задержка перед следующей транзакцией: {delay:.2f} секунд.")
-            print(f"Задержка перед следующей транзакцией: {delay:.2f} секунд.")
-            time.sleep(delay)  # Задержка перед выполнением следующей транзакции
 if __name__ == "__main__":
     start_purchase_process()
